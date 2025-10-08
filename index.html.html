@@ -1,588 +1,13 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rugby Premiership Predictor 2025/26</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#5D5CDE',
-                        'primary-dark': '#4845b8'
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        .prediction-card {
-            transition: all 0.3s ease;
-        }
-        .prediction-card:hover {
-            transform: translateY(-2px);
-        }
-        .completed-match {
-            opacity: 0.7;
-        }
-        .winner-highlight {
-            background: linear-gradient(45deg, #10b981, #059669);
-        }
-        .toast {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 1000;
-            animation: slideIn 0.3s ease-out;
-        }
-        @keyframes slideIn {
-            from {
-                transform: translateX(400px);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-        .pending-prediction {
-            border-left: 4px solid #f59e0b;
-        }
-        .submitted-prediction {
-            border-left: 4px solid #10b981;
-        }
-    </style>
-</head>
-<body class="bg-white dark:bg-gray-900 text-gray-900 dark:text-white min-h-screen">
-    <div class="container mx-auto px-4 py-6 max-w-6xl">
-        <!-- Header -->
-        <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold mb-2 bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
-                🏉 Rugby Premiership Predictor
-            </h1>
-            <p class="text-lg text-gray-600 dark:text-gray-400">Season 2025/26 • 3 Player Championship</p>
-            <div id="firebase-status" class="mt-2 text-sm">
-                <span class="text-gray-500">⚙️ Checking connection...</span>
-            </div>
-        </div>
-
-        <!-- Firebase Setup Banner -->
-        <div id="firebase-setup-banner" class="mb-6 bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500 rounded-lg p-6 hidden">
-            <h3 class="text-xl font-bold mb-3">🔧 Firebase Setup Required</h3>
-            <p class="mb-4">To enable automatic syncing between all players, please set up Firebase (takes 5 minutes, free forever):</p>
-            <ol class="list-decimal list-inside space-y-2 mb-4 text-sm">
-                <li>Go to <a href="https://console.firebase.google.com" target="_blank" class="text-blue-600 underline">Firebase Console</a></li>
-                <li>Click "Add project" → Name it "rugby-predictor" → Continue</li>
-                <li>Disable Google Analytics (not needed) → Create project</li>
-                <li>Click "Realtime Database" in left menu → Create Database</li>
-                <li>Choose location (europe-west1) → Start in <strong>test mode</strong> → Enable</li>
-                <li>Click ⚙️ (Settings) → Project settings → Scroll to "Your apps"</li>
-                <li>Click "&lt;/&gt;" (Web app) → Register app → Copy the config</li>
-            </ol>
-            <div class="bg-white dark:bg-gray-800 p-4 rounded border">
-                <label class="block font-bold mb-2">Paste your Firebase config here:</label>
-                <textarea id="firebase-config-input" rows="8" class="w-full p-2 border rounded font-mono text-xs" placeholder='const firebaseConfig = {
-  apiKey: "...",
-  authDomain: "...",
-  databaseURL: "...",
-  projectId: "...",
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "..."
-};'></textarea>
-                <div class="mt-3 flex gap-3">
-                    <button onclick="saveFirebaseConfig()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded font-medium">
-                        💾 Save & Connect
-                    </button>
-                    <button onclick="dismissFirebaseSetup()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded font-medium">
-                        Skip (use Export/Import instead)
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Navigation Tabs -->
-        <div class="flex flex-wrap justify-center mb-6 border-b border-gray-200 dark:border-gray-700">
-            <button onclick="showTab('leaderboard')" id="tab-leaderboard" class="tab-button px-6 py-3 font-medium border-b-2 border-primary text-primary">
-                🏆 Leaderboard
-            </button>
-            <button onclick="showTab('predictions')" id="tab-predictions" class="tab-button px-6 py-3 font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-                📊 Predictions
-            </button>
-            <button onclick="showTab('fixtures')" id="tab-fixtures" class="tab-button px-6 py-3 font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-                📅 Fixtures
-            </button>
-            <button onclick="showTab('results')" id="tab-results" class="tab-button px-6 py-3 font-medium border-b-2 border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
-                ✅ Enter Results
-            </button>
-        </div>
-
-        <!-- Leaderboard Tab -->
-        <div id="leaderboard-tab" class="tab-content">
-            <div class="bg-gray-50 dark:bg-gray-800 rounded-lg p-6 mb-6">
-                <h2 class="text-2xl font-bold mb-4">🏆 Championship Leaderboard</h2>
-                <div id="leaderboard-content" class="space-y-3">
-                    <!-- Leaderboard will be populated here -->
-                </div>
-            </div>
-            
-            <!-- Points System Explanation -->
-            <div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
-                <h3 class="font-bold mb-2">📋 Weekly Ranking System</h3>
-                <ul class="text-sm space-y-1">
-                    <li><strong>Match Points:</strong> Exact Score (5pts) • Correct Result + Margin ≤3 (3pts) • Correct Result (1pt) • Wrong (0pts)</li>
-                    <li><strong>Weekly Ranking:</strong> Total match points per Game Week, with accuracy as tiebreaker</li>
-                    <li><strong>Season Points:</strong> 1st place = 3pts • 2nd place = 2pts • 3rd place = 1pt</li>
-                    <li><strong>Accuracy Score:</strong> Average margin difference (lower = better) • Wrong winners get negative accuracy</li>
-                </ul>
-            </div>
-        </div>
-
-        <!-- Predictions Tab -->
-        <div id="predictions-tab" class="tab-content hidden">
-            <div class="mb-4">
-                <div class="flex flex-wrap gap-4 items-center justify-between mb-4">
-                    <div class="flex-1 min-w-[200px]">
-                        <label for="player-select" class="block text-sm font-medium mb-2">Select Player:</label>
-                        <select id="player-select" class="w-full md:w-64 p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-base">
-                            <option value="player1">Martin</option>
-                            <option value="player2">Charles</option>
-                            <option value="player3">Alex</option>
-                        </select>
-                    </div>
-                    <button onclick="submitPendingPredictions()" id="submit-predictions-btn" class="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-lg font-medium shadow-lg">
-                        📤 Submit Predictions (<span id="submit-count">0</span>)
-                    </button>
-                </div>
-                <div id="pending-count" class="hidden">
-                    <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 text-sm">
-                        <strong class="text-yellow-800 dark:text-yellow-200">⚠️ Pending predictions:</strong> 
-                        <span id="pending-number" class="font-bold">0</span> predictions not yet submitted. Click "Submit Predictions" when ready to lock them in!
-                    </div>
-                </div>
-            </div>
-            <div id="predictions-content" class="grid gap-4">
-                <!-- Predictions will be populated here -->
-            </div>
-        </div>
-
-        <!-- Fixtures Tab -->
-        <div id="fixtures-tab" class="tab-content hidden">
-            <div class="mb-4 flex flex-wrap gap-3">
-                <button onclick="addFixture()" class="bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-lg font-medium">
-                    ➕ Add Fixture
-                </button>
-                <button onclick="reloadRound1Data()" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg font-medium">
-                    🔄 Reload Round 1 Data
-                </button>
-                <button onclick="exportData()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-medium">
-                    📥 Export Data
-                </button>
-                <button onclick="importData()" class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg font-medium">
-                    📤 Import Data
-                </button>
-                <button onclick="resetAllData()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium">
-                    🗑️ Reset All Data
-                </button>
-            </div>
-            <input type="file" id="import-file-input" accept=".json" class="hidden" onchange="handleImportFile(event)">
-            <div id="fixtures-content" class="space-y-4">
-                <!-- Fixtures will be populated here -->
-            </div>
-        </div>
-
-        <!-- Results Tab -->
-        <div id="results-tab" class="tab-content hidden">
-            <div class="mb-4">
-                <h2 class="text-2xl font-bold mb-2">Enter Match Results</h2>
-                <p class="text-gray-600 dark:text-gray-400">Enter actual scores to calculate points and update the leaderboard.</p>
-            </div>
-            <div id="results-content" class="space-y-4">
-                <!-- Results entry will be populated here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Add Fixture Modal -->
-    <div id="fixture-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full mx-4">
-            <h3 class="text-lg font-bold mb-4">Add New Fixture</h3>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium mb-1">Home Team:</label>
-                    <select id="home-team" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-base">
-                        <!-- Teams will be populated -->
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium mb-1">Away Team:</label>
-                    <select id="away-team" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-base">
-                        <!-- Teams will be populated -->
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium mb-1">Match Date:</label>
-                    <input type="date" id="match-date" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-base">
-                </div>
-                <div>
-                    <label class="block text-sm font-medium mb-1">Round:</label>
-                    <input type="text" id="match-round" placeholder="e.g., Round 1" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-base">
-                </div>
-                <div class="flex justify-end space-x-3">
-                    <button onclick="closeFixtureModal()" class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
-                        Cancel
-                    </button>
-                    <button onclick="saveFixture()" class="px-4 py-2 bg-primary text-white hover:bg-primary-dark rounded">
-                        Add Fixture
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            document.documentElement.classList.add('dark');
-        }
-
-        // Firebase variables
-        let firebaseInitialized = false;
-        let database = null;
-        let dataRef = null;
-
-        const teams = [
-            'Bath', 'Bristol Bears', 'Exeter', 'Gloucester',
-            'Harlequins', 'Leicester Tigers', 'Newcastle Red Bulls', 'Northampton',
-            'Sale Sharks', 'Saracens'
-        ];
-
-        let fixtures = [];
-        let predictions = {
-            player1: { submitted: {}, pending: {} },
-            player2: { submitted: {}, pending: {} },
-            player3: { submitted: {}, pending: {} }
-        };
-        let results = {};
-        let playerNames = {
-            player1: 'Martin',
-            player2: 'Charles', 
-            player3: 'Alex'
-        };
-
-        function loadFromStorage() {
-            try {
-                const saved = JSON.parse(localStorage.getItem('rugbyData') || 'null');
-                if (saved && saved.fixtures && saved.fixtures.length > 0) {
-                    fixtures = saved.fixtures || [];
-                    predictions = saved.predictions || predictions;
-                    results = saved.results || {};
-                    playerNames = saved.playerNames || playerNames;
-                    
-                    // Check if Round 1 is already completed, if not, reinitialize
-                    const round1Fixture = fixtures.find(f => f.id === 1);
-                    if (!round1Fixture || !round1Fixture.completed) {
-                        console.log('Reinitializing with Round 1 data...');
-                        return false; // Force reinitialization
-                    }
-                    
-                    return true;
-                }
-            } catch (e) {
-                console.error('Error loading:', e);
-            }
-            return false;
-        }
-
-        function saveToStorage() {
-            try {
-                const data = { fixtures, predictions, results, playerNames };
-                localStorage.setItem('rugbyData', JSON.stringify(data));
-                
-                // Also save to Firebase if initialized
-                if (firebaseInitialized && dataRef) {
-                    dataRef.set(data).catch(err => {
-                        console.error('Firebase save error:', err);
-                    });
-                }
-            } catch (e) {
-                showToast('⚠️ Error saving data', 'error');
-            }
-        }
-
-        function initializeSampleData() {
-            fixtures = [
-                // ROUND 1 - September 20-21, 2025 (COMPLETED)
-                { id: 1, homeTeam: 'Northampton', awayTeam: 'Exeter', date: '2025-09-20', round: 'Round 1', completed: true },
-                { id: 2, homeTeam: 'Sale Sharks', awayTeam: 'Bath', date: '2025-09-20', round: 'Round 1', completed: true },
-                { id: 3, homeTeam: 'Saracens', awayTeam: 'Gloucester', date: '2025-09-20', round: 'Round 1', completed: true },
-                { id: 4, homeTeam: 'Leicester Tigers', awayTeam: 'Newcastle Red Bulls', date: '2025-09-21', round: 'Round 1', completed: true },
-                { id: 5, homeTeam: 'Bristol Bears', awayTeam: 'Harlequins', date: '2025-09-21', round: 'Round 1', completed: true },
-                // ROUND 2 - September 27-28, 2025
-                { id: 6, homeTeam: 'Bath', awayTeam: 'Northampton', date: '2025-09-27', round: 'Round 2', completed: false },
-                { id: 7, homeTeam: 'Exeter', awayTeam: 'Saracens', date: '2025-09-27', round: 'Round 2', completed: false },
-                { id: 8, homeTeam: 'Newcastle Red Bulls', awayTeam: 'Bristol Bears', date: '2025-09-27', round: 'Round 2', completed: false },
-                { id: 9, homeTeam: 'Gloucester', awayTeam: 'Leicester Tigers', date: '2025-09-28', round: 'Round 2', completed: false },
-                { id: 10, homeTeam: 'Harlequins', awayTeam: 'Sale Sharks', date: '2025-09-28', round: 'Round 2', completed: false }
-            ];
-
-            // Add Round 1 actual results
-            results[1] = { homeScore: 33, awayScore: 33 }; // Northampton 33-33 Exeter
-            results[2] = { homeScore: 27, awayScore: 10 }; // Sale Sharks 27-10 Bath (was Gloucester in original)
-            results[3] = { homeScore: 17, awayScore: 39 }; // Saracens 17-39 Gloucester (originally Newcastle vs Saracens)
-            results[4] = { homeScore: 42, awayScore: 24 }; // Leicester Tigers 42-24 Newcastle Red Bulls
-            results[5] = { homeScore: 31, awayScore: 47 }; // Bristol Bears 31-47 Harlequins
-
-            // Charles's Round 1 predictions (submitted)
-            predictions.player2.submitted[1] = { homeScore: 32, awayScore: 16 }; // Northampton vs Exeter
-            predictions.player2.submitted[2] = { homeScore: 32, awayScore: 25 }; // Sale Sharks vs Bath
-            predictions.player2.submitted[3] = { homeScore: 15, awayScore: 33 }; // Saracens vs Gloucester
-            predictions.player2.submitted[4] = { homeScore: 32, awayScore: 25 }; // Leicester Tigers vs Newcastle Red Bulls
-            predictions.player2.submitted[5] = { homeScore: 10, awayScore: 25 }; // Bristol Bears vs Harlequins
-
-            // Martin's Round 1 predictions (submitted)
-            predictions.player1.submitted[1] = { homeScore: 33, awayScore: 22 }; // Northampton vs Exeter
-            predictions.player1.submitted[2] = { homeScore: 29, awayScore: 12 }; // Sale Sharks vs Bath
-            predictions.player1.submitted[3] = { homeScore: 11, awayScore: 27 }; // Saracens vs Gloucester
-            predictions.player1.submitted[4] = { homeScore: 26, awayScore: 22 }; // Leicester Tigers vs Newcastle Red Bulls
-            predictions.player1.submitted[5] = { homeScore: 20, awayScore: 26 }; // Bristol Bears vs Harlequins
-
-            // Alex's Round 1 predictions (submitted - only first 3 matches)
-            predictions.player3.submitted[1] = { homeScore: 26, awayScore: 30 }; // Northampton vs Exeter
-            predictions.player3.submitted[2] = { homeScore: 30, awayScore: 26 }; // Sale Sharks vs Bath
-            predictions.player3.submitted[3] = { homeScore: 26, awayScore: 30 }; // Saracens vs Gloucester
-
-            saveToStorage();
-        }
-
-        function showTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('border-primary', 'text-primary');
-                btn.classList.add('border-transparent', 'text-gray-500');
-            });
-
-            document.getElementById(`${tabName}-tab`).classList.remove('hidden');
-            const tabBtn = document.getElementById(`tab-${tabName}`);
-            tabBtn.classList.add('border-primary', 'text-primary');
-            tabBtn.classList.remove('border-transparent', 'text-gray-500');
-
-            if (tabName === 'predictions') updatePredictionsView();
-            if (tabName === 'fixtures') updateFixturesView();
-            if (tabName === 'results') updateResultsView();
-            if (tabName === 'leaderboard') updateLeaderboard();
-        }
-
-        function updatePredictionsView() {
-            const playerId = document.getElementById('player-select').value;
-            const playerPreds = predictions[playerId];
-            
-            const grouped = {};
-            fixtures.forEach(f => {
-                if (!grouped[f.round]) grouped[f.round] = [];
-                grouped[f.round].push(f);
-            });
-
-            let html = '';
-            Object.keys(grouped).forEach(round => {
-                html += `<div class="mb-8"><h3 class="text-xl font-bold mb-4 text-primary">${round}</h3><div class="grid gap-4">`;
-                grouped[round].forEach(fixture => {
-                    const submitted = playerPreds.submitted[fixture.id];
-                    const pending = playerPreds.pending[fixture.id];
-                    const pred = submitted || pending || {};
-                    const isSubmitted = !!submitted;
-                    const isPending = !!pending && !submitted;
-                    const isCompleted = fixture.completed;
-                    const actualResult = results[fixture.id];
-                    const points = isCompleted && actualResult && submitted ? calculatePoints(submitted, actualResult) : null;
-                    
-                    html += `
-                        <div class="prediction-card bg-white dark:bg-gray-800 p-4 rounded-lg border ${isPending ? 'pending-prediction' : isSubmitted ? 'submitted-prediction' : 'border-gray-200'}">
-                            <div class="flex justify-between mb-3">
-                                <div class="font-bold">${fixture.homeTeam} vs ${fixture.awayTeam}</div>
-                                <div class="text-sm text-gray-500">
-                                    ${new Date(fixture.date).toLocaleDateString()}
-                                    ${isCompleted ? '<span class="ml-2 bg-gray-500 text-white px-2 py-1 rounded text-xs">COMPLETED</span>' : ''}
-                                    ${isSubmitted && !isCompleted ? '<span class="ml-2 bg-green-500 text-white px-2 py-1 rounded text-xs">✓ SUBMITTED</span>' : ''}
-                                    ${isPending ? '<span class="ml-2 bg-yellow-500 text-white px-2 py-1 rounded text-xs">⚠ PENDING</span>' : ''}
-                                </div>
-                            </div>
-                            
-                            ${isCompleted && actualResult ? `
-                                <div class="mb-3 p-3 bg-gray-100 dark:bg-gray-700 rounded">
-                                    <div class="text-sm font-medium mb-2">Match Result: ${actualResult.homeScore} - ${actualResult.awayScore}</div>
-                                    ${submitted ? `
-                                        <div class="text-sm">Your Prediction: ${submitted.homeScore} - ${submitted.awayScore}</div>
-                                        ${points !== null ? `<div class="font-bold text-lg mt-2 ${points === 5 ? 'text-green-600' : points === 3 ? 'text-blue-600' : points === 1 ? 'text-yellow-600' : 'text-red-600'}">Points: ${points}</div>` : ''}
-                                    ` : '<div class="text-sm text-red-500">No prediction submitted</div>'}
-                                </div>
-                            ` : ''}
-
-                            <div class="flex space-x-4 items-center">
-                                <input type="number" min="0" max="100" value="${pred.homeScore || ''}" 
-                                       onchange="updatePrediction('${playerId}', ${fixture.id}, 'homeScore', this.value)"
-                                       ${isSubmitted || isCompleted ? 'disabled' : ''}
-                                       class="flex-1 p-2 border rounded ${isSubmitted || isCompleted ? 'opacity-50 bg-gray-100' : ''}">
-                                <span class="font-bold">-</span>
-                                <input type="number" min="0" max="100" value="${pred.awayScore || ''}"
-                                       onchange="updatePrediction('${playerId}', ${fixture.id}, 'awayScore', this.value)"
-                                       ${isSubmitted || isCompleted ? 'disabled' : ''}
-                                       class="flex-1 p-2 border rounded ${isSubmitted || isCompleted ? 'opacity-50 bg-gray-100' : ''}">
-                            </div>
-                        </div>
-                    `;
+Points + ' pts • ' + seasonPointsEarned + ' season pts</div>';
+                    weekHtml += '<div class="text-gray-500 dark:text-gray-400">Accuracy: ' + player.averageAccuracy.toFixed(1) + '</div>';
+                    weekHtml += '</div></div>';
                 });
-                html += '</div></div>';
+
+                weeklyHtml += '<div class="mb-6"><h4 class="font-bold text-lg mb-3 text-primary">' + round + ' Results</h4>';
+                weeklyHtml += '<div class="space-y-2">' + weekHtml + '</div></div>';
             });
 
-            document.getElementById('predictions-content').innerHTML = html;
-            updatePendingCount(playerId);
-        }
-
-        function updatePendingCount(playerId) {
-            const count = Object.keys(predictions[playerId].pending).length;
-            document.getElementById('pending-count').classList.toggle('hidden', count === 0);
-            document.getElementById('pending-number').textContent = count;
-            document.getElementById('submit-count').textContent = count;
-            
-            const submitBtn = document.getElementById('submit-predictions-btn');
-            if (count === 0) {
-                submitBtn.disabled = true;
-                submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            } else {
-                submitBtn.disabled = false;
-                submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            }
-        }
-
-        function updatePrediction(playerId, fixtureId, field, value) {
-            if (!predictions[playerId].pending[fixtureId]) {
-                predictions[playerId].pending[fixtureId] = {};
-            }
-            predictions[playerId].pending[fixtureId][field] = value;
-            saveToStorage();
-            updatePendingCount(playerId);
-        }
-
-        function submitPendingPredictions() {
-            const playerId = document.getElementById('player-select').value;
-            const pending = predictions[playerId].pending;
-            let count = 0;
-            
-            Object.keys(pending).forEach(id => {
-                const pred = pending[id];
-                if (pred.homeScore && pred.awayScore) {
-                    predictions[playerId].submitted[id] = {...pred};
-                    count++;
-                }
-            });
-            
-            predictions[playerId].pending = {};
-            saveToStorage();
-            updatePredictionsView();
-            showToast(`✅ ${count} prediction${count !== 1 ? 's' : ''} submitted!`, 'success');
-        }
-
-        function updateFixturesView() {
-            const html = fixtures.map(f => `
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border">
-                    <div class="flex justify-between">
-                        <div>
-                            <div class="font-bold">${f.homeTeam} vs ${f.awayTeam}</div>
-                            <div class="text-sm text-gray-500">${f.round} • ${new Date(f.date).toLocaleDateString()}</div>
-                        </div>
-                        <button onclick="removeFixture(${f.id})" class="bg-red-500 text-white px-3 py-1 rounded text-sm">Remove</button>
-                    </div>
-                </div>
-            `).join('');
-            document.getElementById('fixtures-content').innerHTML = html || '<p class="text-center py-8 text-gray-500">No fixtures yet</p>';
-        }
-
-        function updateResultsView() {
-            const html = fixtures.filter(f => !f.completed).map(f => `
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border">
-                    <div class="font-bold mb-2">${f.homeTeam} vs ${f.awayTeam}</div>
-                    <div class="flex space-x-4 items-center">
-                        <input type="number" id="result-home-${f.id}" class="flex-1 p-2 border rounded" placeholder="Home">
-                        <span>-</span>
-                        <input type="number" id="result-away-${f.id}" class="flex-1 p-2 border rounded" placeholder="Away">
-                        <button onclick="saveResult(${f.id})" class="bg-green-500 text-white px-4 py-2 rounded">Save</button>
-                    </div>
-                </div>
-            `).join('');
-            document.getElementById('results-content').innerHTML = html || '<p class="text-center py-8 text-gray-500">All complete!</p>';
-        }
-
-        function updateLeaderboard() {
-            const { weeklyResults, seasonTotals } = calculateWeeklyRankings();
-
-            const sortedPlayers = Object.values(seasonTotals).sort((a, b) => b.seasonPoints - a.seasonPoints);
-
-            const seasonLeaderboardHtml = sortedPlayers.map((player, index) => {
-                const position = index + 1;
-                const isWinner = position === 1 && player.seasonPoints > 0;
-                
-                return `
-                    <div class="flex items-center justify-between p-4 rounded-lg border ${isWinner ? 'winner-highlight text-white' : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600'}">
-                        <div class="flex items-center space-x-4">
-                            <div class="text-2xl font-bold ${isWinner ? 'text-yellow-300' : 'text-gray-500'}">
-                                ${position === 1 ? '🥇' : position === 2 ? '🥈' : position === 3 ? '🥉' : `#${position}`}
-                            </div>
-                            <div>
-                                <div class="font-bold text-lg">${player.name}</div>
-                                <div class="text-sm ${isWinner ? 'text-gray-200' : 'text-gray-500 dark:text-gray-400'}">
-                                    ${player.weeksWon}W • ${player.weeksSecond}× 2nd • ${player.weeksThird}× 3rd
-                                </div>
-                            </div>
-                        </div>
-                        <div class="text-right">
-                            <div class="text-2xl font-bold">${player.seasonPoints}</div>
-                            <div class="text-sm ${isWinner ? 'text-gray-200' : 'text-gray-500 dark:text-gray-400'}">Season Points</div>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-
-            const weeklyResultsHtml = Object.keys(weeklyResults).reverse().map(round => {
-                const weekResults = weeklyResults[round];
-                
-                const weekHtml = weekResults.map((player, index) => {
-                    const position = index + 1;
-                    const seasonPointsEarned = position === 1 ? 3 : position === 2 ? 2 : position === 3 ? 1 : 0;
-                    
-                    return `
-                        <div class="flex justify-between items-center py-2 px-3 rounded ${position === 1 ? 'bg-yellow-50 dark:bg-yellow-900/20' : position === 2 ? 'bg-gray-50 dark:bg-gray-700/50' : position === 3 ? 'bg-orange-50 dark:bg-orange-900/20' : 'bg-gray-25 dark:bg-gray-800/30'}">
-                            <div class="flex items-center space-x-3">
-                                <span class="font-bold text-lg">${position === 1 ? '🥇' : position === 2 ? '🥈' : position === 3 ? '🥉' : `#${position}`}</span>
-                                <span class="font-medium">${player.name}</span>
-                            </div>
-                            <div class="text-right text-sm">
-                                <div class="font-bold">${player.weeklyPoints} pts • ${seasonPointsEarned} season pts</div>
-                                <div class="text-gray-500 dark:text-gray-400">Accuracy: ${player.averageAccuracy.toFixed(1)}</div>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                return `
-                    <div class="mb-6">
-                        <h4 class="font-bold text-lg mb-3 text-primary">${round} Results</h4>
-                        <div class="space-y-2">${weekHtml}</div>
-                    </div>
-                `;
-            }).join('');
-
-            const content = `
-                <div class="mb-8">
-                    <h3 class="text-xl font-bold mb-4">🏆 Season Championship</h3>
-                    <div class="space-y-3">${seasonLeaderboardHtml}</div>
-                </div>
-                ${weeklyResultsHtml ? `<div><h3 class="text-xl font-bold mb-4">📅 Weekly Results</h3>${weeklyResultsHtml}</div>` : ''}
-            `;
+            const content = '<div class="mb-8"><h3 class="text-xl font-bold mb-4">🏆 Season Championship</h3><div class="space-y-3">' + seasonHtml + '</div></div>' + (weeklyHtml ? '<div><h3 class="text-xl font-bold mb-4">📅 Weekly Results</h3>' + weeklyHtml + '</div>' : '');
 
             document.getElementById('leaderboard-content').innerHTML = content || '<p class="text-center py-8 text-gray-500">No results yet. Enter some results to see the leaderboard!</p>';
         }
@@ -723,7 +148,7 @@
         }
 
         function addFixture() {
-            const html = teams.map(t => `<option value="${t}">${t}</option>`).join('');
+            const html = teams.map(t => '<option value="' + t + '">' + t + '</option>').join('');
             document.getElementById('home-team').innerHTML = html;
             document.getElementById('away-team').innerHTML = html;
             document.getElementById('fixture-modal').classList.remove('hidden');
@@ -749,8 +174,8 @@
                 id: Date.now(),
                 homeTeam: home,
                 awayTeam: away,
-                date,
-                round,
+                date: date,
+                round: round,
                 completed: false
             });
             
@@ -775,8 +200,8 @@
         }
 
         function saveResult(id) {
-            const home = document.getElementById(`result-home-${id}`).value;
-            const away = document.getElementById(`result-away-${id}`).value;
+            const home = document.getElementById('result-home-' + id).value;
+            const away = document.getElementById('result-away-' + id).value;
             
             if (!home || !away) {
                 showToast('⚠️ Enter both scores', 'error');
@@ -808,11 +233,9 @@
         }
 
         function reloadRound1Data() {
-            if (confirm('This will reload Round 1 fixtures, predictions, and results. Any existing Round 1 data will be overwritten. Continue?')) {
-                // Remove existing Round 1 fixtures
+            if (confirm('This will reload Round 1 fixtures, predictions, and results. Continue?')) {
                 fixtures = fixtures.filter(f => f.round !== 'Round 1');
                 
-                // Add Round 1 fixtures (completed)
                 fixtures.unshift(
                     { id: 1, homeTeam: 'Northampton', awayTeam: 'Exeter', date: '2025-09-20', round: 'Round 1', completed: true },
                     { id: 2, homeTeam: 'Sale Sharks', awayTeam: 'Bath', date: '2025-09-20', round: 'Round 1', completed: true },
@@ -821,28 +244,24 @@
                     { id: 5, homeTeam: 'Bristol Bears', awayTeam: 'Harlequins', date: '2025-09-21', round: 'Round 1', completed: true }
                 );
 
-                // Add Round 1 results
                 results[1] = { homeScore: 33, awayScore: 33 };
                 results[2] = { homeScore: 27, awayScore: 10 };
                 results[3] = { homeScore: 17, awayScore: 39 };
                 results[4] = { homeScore: 42, awayScore: 24 };
                 results[5] = { homeScore: 31, awayScore: 47 };
 
-                // Charles's predictions
                 predictions.player2.submitted[1] = { homeScore: 32, awayScore: 16 };
                 predictions.player2.submitted[2] = { homeScore: 32, awayScore: 25 };
                 predictions.player2.submitted[3] = { homeScore: 15, awayScore: 33 };
                 predictions.player2.submitted[4] = { homeScore: 32, awayScore: 25 };
                 predictions.player2.submitted[5] = { homeScore: 10, awayScore: 25 };
 
-                // Martin's predictions
                 predictions.player1.submitted[1] = { homeScore: 33, awayScore: 22 };
                 predictions.player1.submitted[2] = { homeScore: 29, awayScore: 12 };
                 predictions.player1.submitted[3] = { homeScore: 11, awayScore: 27 };
                 predictions.player1.submitted[4] = { homeScore: 26, awayScore: 22 };
                 predictions.player1.submitted[5] = { homeScore: 20, awayScore: 26 };
 
-                // Alex's predictions (first 3 only)
                 predictions.player3.submitted[1] = { homeScore: 26, awayScore: 30 };
                 predictions.player3.submitted[2] = { homeScore: 30, awayScore: 26 };
                 predictions.player3.submitted[3] = { homeScore: 26, awayScore: 30 };
@@ -856,10 +275,10 @@
 
         function exportData() {
             const dataToExport = {
-                fixtures,
-                predictions,
-                results,
-                playerNames,
+                fixtures: fixtures,
+                predictions: predictions,
+                results: results,
+                playerNames: playerNames,
                 exportDate: new Date().toISOString(),
                 version: '1.0'
             };
@@ -870,7 +289,7 @@
             
             const link = document.createElement('a');
             link.href = url;
-            link.download = `rugby-predictor-backup-${new Date().toISOString().split('T')[0]}.json`;
+            link.download = 'rugby-predictor-backup-' + new Date().toISOString().split('T')[0] + '.json';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -892,13 +311,12 @@
                 try {
                     const importedData = JSON.parse(e.target.result);
                     
-                    // Validate data structure
                     if (!importedData.fixtures || !importedData.predictions || !importedData.results) {
                         showToast('❌ Invalid data file', 'error');
                         return;
                     }
                     
-                    if (confirm('This will replace all current data with the imported data. Continue?')) {
+                    if (confirm('This will replace all current data. Continue?')) {
                         fixtures = importedData.fixtures;
                         predictions = importedData.predictions;
                         results = importedData.results;
@@ -917,39 +335,34 @@
                 }
             };
             reader.readAsText(file);
-            
-            // Reset file input
             event.target.value = '';
         }
 
         function showToast(msg, type) {
             const toast = document.createElement('div');
-            toast.className = `toast ${type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white px-6 py-3 rounded-lg shadow-lg`;
+            toast.className = 'toast ' + (type === 'success' ? 'bg-green-500' : 'bg-red-500') + ' text-white px-6 py-3 rounded-lg shadow-lg';
             toast.textContent = msg;
             document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
+            setTimeout(function() { toast.remove(); }, 3000);
         }
 
-        document.getElementById('player-select').addEventListener('change', updatePredictionsView);
-
-        // Firebase setup functions
         function initializeFirebase() {
-            const savedConfig = localStorage.getItem('firebaseConfig');
+            const config = {
+                apiKey: "AIzaSyDOTBQ7Ap-ZDAkp0F08QxlFZP4MnfG760g",
+                authDomain: "rugby-predictor-680fd.firebaseapp.com",
+                databaseURL: "https://rugby-predictor-680fd-default-rtdb.europe-west1.firebasedatabase.app",
+                projectId: "rugby-predictor-680fd",
+                storageBucket: "rugby-predictor-680fd.firebasestorage.app",
+                messagingSenderId: "211386280151",
+                appId: "1:211386280151:web:6863351c2a574609db6892"
+            };
             
-            if (!savedConfig) {
-                document.getElementById('firebase-setup-banner').classList.remove('hidden');
-                updateFirebaseStatus('❌ Not connected - Setup required', 'text-red-500');
-                return;
-            }
-
             try {
-                const config = JSON.parse(savedConfig);
                 firebase.initializeApp(config);
                 database = firebase.database();
                 dataRef = database.ref('rugbyData');
                 
-                // Listen for changes
-                dataRef.on('value', (snapshot) => {
+                dataRef.on('value', function(snapshot) {
                     const data = snapshot.val();
                     if (data) {
                         fixtures = data.fixtures || fixtures;
@@ -957,108 +370,50 @@
                         results = data.results || results;
                         playerNames = data.playerNames || playerNames;
                         
-                        // Update UI
-                        const currentTab = document.querySelector('.tab-button.border-primary').id.replace('tab-', '');
-                        if (currentTab === 'predictions') updatePredictionsView();
-                        if (currentTab === 'fixtures') updateFixturesView();
-                        if (currentTab === 'results') updateResultsView();
-                        if (currentTab === 'leaderboard') updateLeaderboard();
+                        const currentTab = document.querySelector('.tab-button.border-primary');
+                        if (currentTab) {
+                            const tabName = currentTab.id.replace('tab-', '');
+                            if (tabName === 'predictions') updatePredictionsView();
+                            if (tabName === 'fixtures') updateFixturesView();
+                            if (tabName === 'results') updateResultsView();
+                            if (tabName === 'leaderboard') updateLeaderboard();
+                        }
                     }
                 });
                 
                 firebaseInitialized = true;
                 updateFirebaseStatus('✅ Connected - Live sync active', 'text-green-600');
-                console.log('Firebase initialized successfully');
                 
             } catch (error) {
                 console.error('Firebase init error:', error);
                 updateFirebaseStatus('❌ Connection failed', 'text-red-500');
-                document.getElementById('firebase-setup-banner').classList.remove('hidden');
             }
-        }
-
-        function saveFirebaseConfig() {
-            const input = document.getElementById('firebase-config-input').value.trim();
-            
-            if (!input) {
-                showToast('❌ Please paste your Firebase config', 'error');
-                return;
-            }
-            
-            try {
-                // Try multiple parsing methods
-                let config = null;
-                
-                // Method 1: Direct JSON parse
-                try {
-                    config = JSON.parse(input);
-                } catch (e) {
-                    // Method 2: Extract from const declaration
-                    const match1 = input.match(/firebaseConfig\s*=\s*(\{[\s\S]*?\});?/);
-                    if (match1) {
-                        config = JSON.parse(match1[1]);
-                    } else {
-                        // Method 3: Just find the object
-                        const match2 = input.match(/(\{[\s\S]*\})/);
-                        if (match2) {
-                            config = JSON.parse(match2[1]);
-                        }
-                    }
-                }
-                
-                if (!config) {
-                    showToast('❌ Could not find config object', 'error');
-                    return;
-                }
-                
-                // Validate required fields
-                const required = ['apiKey', 'databaseURL', 'projectId'];
-                const missing = required.filter(field => !config[field]);
-                
-                if (missing.length > 0) {
-                    showToast(`❌ Missing fields: ${missing.join(', ')}`, 'error');
-                    return;
-                }
-                
-                localStorage.setItem('firebaseConfig', JSON.stringify(config));
-                document.getElementById('firebase-setup-banner').classList.add('hidden');
-                showToast('✅ Firebase configured! Reloading...', 'success');
-                
-                setTimeout(() => {
-                    window.location.reload();
-                }, 1500);
-                
-            } catch (error) {
-                showToast('❌ Config format error: ' + error.message, 'error');
-                console.error('Full error:', error);
-                console.log('Input received:', input);
-            }
-        }
-
-        function dismissFirebaseSetup() {
-            document.getElementById('firebase-setup-banner').classList.add('hidden');
-            localStorage.setItem('firebaseConfigDismissed', 'true');
-            updateFirebaseStatus('📥 Local mode - Use Export/Import', 'text-yellow-600');
         }
 
         function updateFirebaseStatus(message, colorClass) {
             const statusEl = document.getElementById('firebase-status');
-            statusEl.innerHTML = `<span class="${colorClass}">${message}</span>`;
+            if (statusEl) {
+                statusEl.innerHTML = '<span class="' + colorClass + '">' + message + '</span>';
+            }
         }
 
-        // Initialize app
-        if (!loadFromStorage()) {
-            initializeSampleData();
-        }
-        
-        // Try to initialize Firebase
-        if (!localStorage.getItem('firebaseConfigDismissed')) {
-            initializeFirebase();
+        document.getElementById('player-select').addEventListener('change', updatePredictionsView);
+
+        if (typeof firebase !== 'undefined') {
+            if (!loadFromStorage()) {
+                initializeSampleData();
+            }
+            setTimeout(initializeFirebase, 100);
+            showTab('leaderboard');
         } else {
-            updateFirebaseStatus('📥 Local mode - Use Export/Import', 'text-yellow-600');
+            window.addEventListener('load', function() {
+                if (!loadFromStorage()) {
+                    initializeSampleData();
+                }
+                setTimeout(initializeFirebase, 500);
+                showTab('leaderboard');
+            });
         }
-        
-        showTab('leaderboard');
     </script>
 </body>
 </html>
